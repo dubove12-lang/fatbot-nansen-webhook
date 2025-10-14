@@ -7,7 +7,7 @@ import discord
 import requests
 from discord.ext import commands
 
-TOKEN = os.environ.get("MTQyNzczNTk4Njk5MzEwMjk5OQ.GVbgkG.GBRY2pfF67aaNAnBWRUAl1kA88vIEpjVTuiZRc")
+TOKEN = os.environ.get("DISCOR_BOT_TOKEN")
 RENDER_WEBHOOK = "https://fatbot-nansen-webhook.onrender.com/nansen"
 
 # ID kanála, kde Nansen posiela alerty
