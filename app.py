@@ -7,12 +7,14 @@ app = Flask(__name__)
 DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK")
 NANSEN_SECRET = os.environ.get("NANSEN_SECRET")
 
-# 🔹 Prijíma "klasické" aj "discord.com" webhook volania
+# ✅ Podpora pre obe formy webhookov (klasický aj Discord.com)
 @app.route('/api/webhooks/<webhook_id>/<webhook_token>', methods=['POST'])
 @app.route('/discord.com/api/webhooks/<webhook_id>/<webhook_token>', methods=['POST'])
 def handle_webhook(webhook_id, webhook_token):
     try:
-        data = request.get_json()
+        data = request.get_json(force=True, silent=True)
+        if not data:
+            return jsonify({"error": "No data received"}), 400
 
         # 🔒 Overenie podpisu (ak Nansen používa X-Nansen-Signature)
         signature = request.headers.get("X-Nansen-Signature")
@@ -21,7 +23,8 @@ def handle_webhook(webhook_id, webhook_token):
             if not hmac.compare_digest(computed, signature):
                 return jsonify({"error": "Invalid signature"}), 401
 
-        if not data or "alerts" not in data:
+        # 🔹 Ak chýba pole alerts, nič nerobíme
+        if "alerts" not in data:
             return jsonify({"status": "ignored"}), 200
 
         title = data.get("title", "Smart Alert")
@@ -37,31 +40,41 @@ def handle_webhook(webhook_id, webhook_token):
             age = a.get("age", "?")
             url = a.get("url", "")
 
-            # 🔁 Prepis URL z Nansenu na FatBot
-            fatbot_url = ""
-            if "tokenAddress" in url:
+            # 🔁 Prepíš URL z Nansenu na FatBot link
+            fatbot_url = url  # fallback
+
+            if "tokenAddress=" in url:
                 parsed = urlparse(url)
                 qs = parse_qs(parsed.query)
                 token_address = qs.get("tokenAddress", [""])[0]
-                chain = qs.get("chain", ["SOLANA"])[0].upper()
+                chain = qs.get("chain", ["solana"])[0].upper()
                 fatbot_url = f"https://fatbot.fatty.io/manual-trading/{chain}/{token_address}"
 
-            description += f"**[{symbol}]({fatbot_url})**\n💸 Inflow: `${inflow:,.2f}` | 🧠 {receivers} wallets\n📊 Vol: {vol} | MC: {mc} | ⏳ Age: {age}\n\n"
+            elif "/token/" in url:
+                token_address = url.split("/token/")[1].split("?")[0]
+                fatbot_url = f"https://fatbot.fatty.io/manual-trading/SOLANA/{token_address}"
 
-        # 📩 Poslanie do reálneho Discord kanála
+            # 🧩 Embed text
+            description += (
+                f"**[{symbol}]({fatbot_url})**\n"
+                f"💸 Inflow: `${inflow:,.2f}` | 🧠 {receivers} wallets\n"
+                f"📊 Vol: {vol} | MC: {mc} | ⏳ Age: {age}\n\n"
+            )
+
+        # 📩 Poslanie embed správy do reálneho Discord kanála
         payload = {
             "embeds": [{
                 "title": title,
-                "description": description,
+                "description": description.strip(),
                 "color": 5814783
             }]
         }
 
         headers = {"Content-Type": "application/json"}
-        requests.post(DISCORD_WEBHOOK, headers=headers, data=json.dumps(payload))
+        r = requests.post(DISCORD_WEBHOOK, headers=headers, data=json.dumps(payload))
 
-        # ✅ Nansen uvidí 204 → úspech
-        return "", 204
+        print(f"Sent to Discord ({r.status_code})")
+        return "", 204  # Nansen očakáva 204 ako OK odpoveď
 
     except Exception as e:
         print(f"Error: {e}")
@@ -75,4 +88,5 @@ def index():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
+
 
