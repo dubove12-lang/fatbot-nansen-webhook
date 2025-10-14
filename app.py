@@ -8,6 +8,9 @@ DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK")
 NANSEN_SECRET = os.environ.get("NANSEN_SECRET")
 
 @app.route('/api/webhooks/<webhook_id>/<webhook_token>', methods=['POST'])
+@app.route('/discord.com/api/webhooks/<webhook_id>/<webhook_token>', methods=['POST'])
+def handle_webhook(webhook_id, webhook_token):
+
 def discord_compatible_webhook(webhook_id, webhook_token):
     try:
         data = request.get_json()
