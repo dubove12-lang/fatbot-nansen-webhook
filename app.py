@@ -1,88 +1,76 @@
-import os
-import hmac
-import hashlib
 from flask import Flask, request, jsonify
-import requests
+import os, hmac, hashlib, requests, json
 from urllib.parse import urlparse, parse_qs
 
 app = Flask(__name__)
 
-# 🔧 Konfigurácia – všetko si ťahá z Render Environment Variables
 DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK")
 NANSEN_SECRET = os.environ.get("NANSEN_SECRET")
 
-@app.route('/nansen', methods=['POST'])
-def nansen_webhook():
-    # ✅ 1. Overenie HMAC podpisu
-    signature = request.headers.get("X-Nansen-Signature")
-    body = request.data
-    expected_sig = "sha256=" + hmac.new(
-        NANSEN_SECRET.encode(), body, hashlib.sha256
-    ).hexdigest()
+@app.route('/api/webhooks/<webhook_id>/<webhook_token>', methods=['POST'])
+def discord_compatible_webhook(webhook_id, webhook_token):
+    try:
+        data = request.get_json()
 
-    if not hmac.compare_digest(signature, expected_sig):
-        return jsonify({"error": "invalid signature"}), 401
+        # 🔒 Overenie podpisu (ak Nansen posiela)
+        signature = request.headers.get("X-Nansen-Signature")
+        if NANSEN_SECRET and signature:
+            computed = hmac.new(NANSEN_SECRET.encode(), request.data, hashlib.sha256).hexdigest()
+            if not hmac.compare_digest(computed, signature):
+                return jsonify({"error": "Invalid signature"}), 401
 
-    data = request.get_json()
-    if not data or "alerts" not in data:
-        return jsonify({"error": "invalid payload"}), 400
+        # 🧠 Základná validácia
+        if not data or "alerts" not in data:
+            return jsonify({"status": "ignored"}), 200
 
-    title = data.get("title", "Nansen Smart Alert")
-    alerts = data["alerts"]
+        title = data.get("title", "Smart Alert")
+        alerts = data["alerts"]
 
-    # ✅ 2. Prepis linkov Nansen → FatBot (zachová token CA)
-    for alert in alerts:
-        try:
-            url = alert["url"]
-            parsed = urlparse(url)
-            params = parse_qs(parsed.query)
-            token_address = params.get("tokenAddress", [""])[0]
-            chain = params.get("chain", ["solana"])[0].upper()
-            # Prepis URL na FatBot formát
-            alert["url"] = f"https://fatbot.fatty.io/manual-trading/{chain}/{token_address}"
-        except Exception:
-            continue
+        description = ""
+        for a in alerts:
+            symbol = a.get("symbol", "Unknown")
+            inflow = a.get("inflow", 0)
+            receivers = a.get("receivers", 0)
+            vol = a.get("volume", "?")
+            mc = a.get("market_cap", "?")
+            age = a.get("age", "?")
+            url = a.get("url", "")
 
-    # ✅ 3. Vytvorenie Discord EMBED – ako originálny Nansen formát
-    embed = {
-        "title": title,
-        "color": 0x5865F2,  # Nansen štýl (Discord modrá)
-        "fields": [],
-        "footer": {
-            "text": "FatBot Smart Alerts ⚡ powered by Nansen.ai"
+            # 🔁 Prepis URL z Nansenu na FatBot
+            fatbot_url = ""
+            if "tokenAddress" in url:
+                parsed = urlparse(url)
+                qs = parse_qs(parsed.query)
+                token_address = qs.get("tokenAddress", [""])[0]
+                chain = qs.get("chain", ["SOLANA"])[0].upper()
+                fatbot_url = f"https://fatbot.fatty.io/manual-trading/{chain}/{token_address}"
+
+            description += f"**[{symbol}]({fatbot_url})**\n💸 Inflow: `${inflow:,.2f}` | 🧠 {receivers} receivers (24h)\n📊 Vol: {vol} | MC: {mc} | ⏳ Age: {age}\n\n"
+
+        # 📩 Poslanie do reálneho Discord kanála
+        payload = {
+            "embeds": [{
+                "title": title,
+                "description": description,
+                "color": 5814783
+            }]
         }
-    }
 
-    # ✅ 4. Vloženie jednotlivých tokenov
-    for alert in alerts:
-        field = {
-            "name": f"{alert['symbol']}",
-            "value": (
-                f"🧠 **Inflow:** ${alert['inflow']:,} | **Receivers:** {alert['receivers']} (24h)\n"
-                f"💰 **Vol:** {alert['volume']} | **MC:** {alert['market_cap']} | **Age:** {alert['age']}\n"
-                f"[🔗 View on FatBot]({alert['url']})"
-            ),
-            "inline": False
-        }
-        embed["fields"].append(field)
+        headers = {"Content-Type": "application/json"}
+        requests.post(DISCORD_WEBHOOK, headers=headers, data=json.dumps(payload))
 
-    # ✅ 5. (Voliteľne) Pridanie odkazov dole ako Nansen
-    embed["description"] = "[Solana](https://fatbot.fatty.io) | [View Dashboard](https://fatbot.fatty.io/dashboard) | [Edit alert](https://fatbot.fatty.io/alerts)"
+        # ✅ Vraciame Discord-like odpoveď, aby bol Nansen spokojný
+        return "", 204
 
-    # ✅ 6. Odoslanie na Discord webhook
-    payload = {"embeds": [embed]}
-    resp = requests.post(DISCORD_WEBHOOK, json=payload)
-
-    if resp.status_code >= 400:
-        return jsonify({"error": "discord failed", "details": resp.text}), 500
-
-    return jsonify({"status": "ok"}), 200
+    except Exception as e:
+        print(f"Error: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/')
-def home():
-    return "FatBot relay running", 200
+def index():
+    return jsonify({"status": "ok"}), 200
 
 
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host='0.0.0.0', port=10000)
