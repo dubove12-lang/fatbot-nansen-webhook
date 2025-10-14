@@ -7,22 +7,20 @@ app = Flask(__name__)
 DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK")
 NANSEN_SECRET = os.environ.get("NANSEN_SECRET")
 
+# 🔹 Prijíma "klasické" aj "discord.com" webhook volania
 @app.route('/api/webhooks/<webhook_id>/<webhook_token>', methods=['POST'])
 @app.route('/discord.com/api/webhooks/<webhook_id>/<webhook_token>', methods=['POST'])
 def handle_webhook(webhook_id, webhook_token):
-
-def discord_compatible_webhook(webhook_id, webhook_token):
     try:
         data = request.get_json()
 
-        # 🔒 Overenie podpisu (ak Nansen posiela)
+        # 🔒 Overenie podpisu (ak Nansen používa X-Nansen-Signature)
         signature = request.headers.get("X-Nansen-Signature")
         if NANSEN_SECRET and signature:
             computed = hmac.new(NANSEN_SECRET.encode(), request.data, hashlib.sha256).hexdigest()
             if not hmac.compare_digest(computed, signature):
                 return jsonify({"error": "Invalid signature"}), 401
 
-        # 🧠 Základná validácia
         if not data or "alerts" not in data:
             return jsonify({"status": "ignored"}), 200
 
@@ -48,7 +46,7 @@ def discord_compatible_webhook(webhook_id, webhook_token):
                 chain = qs.get("chain", ["SOLANA"])[0].upper()
                 fatbot_url = f"https://fatbot.fatty.io/manual-trading/{chain}/{token_address}"
 
-            description += f"**[{symbol}]({fatbot_url})**\n💸 Inflow: `${inflow:,.2f}` | 🧠 {receivers} receivers (24h)\n📊 Vol: {vol} | MC: {mc} | ⏳ Age: {age}\n\n"
+            description += f"**[{symbol}]({fatbot_url})**\n💸 Inflow: `${inflow:,.2f}` | 🧠 {receivers} wallets\n📊 Vol: {vol} | MC: {mc} | ⏳ Age: {age}\n\n"
 
         # 📩 Poslanie do reálneho Discord kanála
         payload = {
@@ -62,7 +60,7 @@ def discord_compatible_webhook(webhook_id, webhook_token):
         headers = {"Content-Type": "application/json"}
         requests.post(DISCORD_WEBHOOK, headers=headers, data=json.dumps(payload))
 
-        # ✅ Vraciame Discord-like odpoveď, aby bol Nansen spokojný
+        # ✅ Nansen uvidí 204 → úspech
         return "", 204
 
     except Exception as e:
@@ -77,3 +75,4 @@ def index():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
+
