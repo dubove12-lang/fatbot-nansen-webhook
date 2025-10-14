@@ -21,7 +21,11 @@ logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
 # Rate limiter (config from env)
-limiter = Limiter(app, key_func=get_remote_address, default_limits=[os.environ.get("RATE_LIMIT", "60/minute")])
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=[os.environ.get("RATE_LIMIT", "60/minute")]
+)
+limiter.init_app(app)
 
 DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK")  # put in Render env
 NANSEN_SECRET = os.environ.get("NANSEN_SECRET", "").encode()  # shared secret for HMAC
