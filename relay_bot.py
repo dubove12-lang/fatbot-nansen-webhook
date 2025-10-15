@@ -36,7 +36,7 @@ async def on_message(message):
     payload = {"content": content, "embeds": embeds}
 
     try:
-        resp = requests.post(RENDER_WEBHOOK, json=payload)
+        resp = requests.post(RENDER_WEBHOOK, json=payload, timeout=5)
         print(f"➡️ Sent to Render: {resp.status_code}")
     except Exception as e:
         print(f"❌ Error sending to Render: {e}")
